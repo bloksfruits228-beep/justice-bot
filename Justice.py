@@ -111,7 +111,7 @@ class RoleTypeView(discord.ui.View):
         data.step = 1
         data.last_interaction = interaction
         await interaction.response.edit_message(
-            content="✅ Вы выбрали **градиент**! Теперь введите **первый цвет** (HEX-код).\n📝 Напишите код в этот чат (сообщение увидите только вы).",
+            content="✅ Вы выбрали **градиент**! Теперь напишите **первый цвет** (HEX-код).\n📝 Напишите код в этот чат (сообщение увидите только вы).",
             embed=None, view=None
         )
 
@@ -128,15 +128,14 @@ class RoleTypeView(discord.ui.View):
         data.step = 1
         data.last_interaction = interaction
         await interaction.response.edit_message(
-            content="✅ Вы выбрали **обычный цвет**! Введите **HEX-код** цвета.\n📝 Напишите код в этот чат (сообщение увидите только вы).",
+            content="✅ Вы выбрали **обычный цвет**! Теперь напишите **HEX-код** цвета.\n📝 Напишите код в этот чат (сообщение увидите только вы).",
             embed=None, view=None
         )
 
 class IconChoiceView(discord.ui.View):
-    def __init__(self, user_id, interaction):
+    def __init__(self, user_id):
         super().__init__(timeout=600)
         self.user_id = user_id
-        self.interaction = interaction
 
     @discord.ui.button(label="✅ Да, нужен значок", style=discord.ButtonStyle.success)
     async def yes_icon(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -419,9 +418,9 @@ async def on_message(message):
                 await message.reply("✅ Первый цвет сохранён! Теперь напишите **второй цвет** (HEX-код).", delete_after=30)
             else:
                 data.step = 3
-                await message.reply("✅ Цвет сохранён! Сейчас спрошу про значок в ЛС.", delete_after=5)
-                await asyncio.sleep(2)
-                await ask_icon(message.author)
+                await message.reply("✅ Цвет сохранён! Теперь выберите, нужен ли значок.", delete_after=5)
+                await asyncio.sleep(1)
+                await ask_icon_in_channel(message.channel, message.author)
             
             await safe_delete_message(message)
             return
@@ -439,10 +438,10 @@ async def on_message(message):
                 return
             data.color2 = int(hex_code, 16)
             data.step = 3
-            await message.reply("✅ Второй цвет сохранён! Сейчас спрошу про значок в ЛС.", delete_after=5)
+            await message.reply("✅ Второй цвет сохранён! Теперь выберите, нужен ли значок.", delete_after=5)
             await safe_delete_message(message)
-            await asyncio.sleep(2)
-            await ask_icon(message.author)
+            await asyncio.sleep(1)
+            await ask_icon_in_channel(message.channel, message.author)
             return
 
         if data.step == 4:
@@ -456,7 +455,11 @@ async def on_message(message):
                 if attachment.content_type and attachment.content_type.startswith('image/'):
                     try:
                         img_data = await attachment.read()
-                        emoji_name = f"role_{data.user_id}_{message.guild.id}"
+                        emoji_name = f"r{data.user_id}"
+                        if len(emoji_name) < 2:
+                            emoji_name = f"r{data.user_id}"
+                        if len(emoji_name) > 32:
+                            emoji_name = emoji_name[:32]
                         emoji = await message.guild.create_custom_emoji(name=emoji_name, image=img_data)
                         data.icon = str(emoji)
                         data.step = 5
@@ -495,20 +498,14 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
-async def ask_icon(user):
+async def ask_icon_in_channel(channel, user):
     embed = discord.Embed(
         title="🖼️ Нужен ли значок?",
         description="Нажмите **Да**, если хотите добавить значок к роли.\nНажмите **Нет**, чтобы пропустить этот шаг.",
         color=0x2b2d31
     )
-    view = IconChoiceView(user.id, None)
-    try:
-        await user.send(embed=embed, view=view)
-    except:
-        try:
-            await user.send("❌ Не могу отправить ЛС. Включите приём сообщений.")
-        except:
-            pass
+    view = IconChoiceView(user.id)
+    await channel.send(f"{user.mention}, выберите действие:", embed=embed, view=view)
 
 async def finish_role_creation(user):
     data = user_data[user.id]
