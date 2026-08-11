@@ -51,6 +51,19 @@ class RoleCreator:
         self.step = 0
         self.cancelled = False
         self.last_interaction = None
+        self.created_at = asyncio.get_event_loop().time()
+        self.temp_messages = []
+
+    def add_temp_message(self, msg):
+        self.temp_messages.append(msg)
+
+    async def clear_temp_messages(self):
+        for msg in self.temp_messages:
+            try:
+                await msg.delete()
+            except:
+                pass
+        self.temp_messages = []
 
 def is_owner_or_admin(interaction, role_id):
     user = interaction.user
@@ -66,7 +79,7 @@ def is_owner_or_admin(interaction, role_id):
 
 class CancelView(discord.ui.View):
     def __init__(self, user_id):
-        super().__init__(timeout=300)
+        super().__init__(timeout=600)
         self.user_id = user_id
 
     @discord.ui.button(label="❌ Отменить создание", style=discord.ButtonStyle.danger)
@@ -75,18 +88,23 @@ class CancelView(discord.ui.View):
             await interaction.response.send_message("❌ Это не ваша сессия!", ephemeral=True)
             return
         if interaction.user.id in user_data:
+            data = user_data[interaction.user.id]
+            await data.clear_temp_messages()
             del user_data[interaction.user.id]
         await interaction.response.edit_message(content="✅ Создание роли отменено.", embed=None, view=None)
 
 class RoleTypeView(discord.ui.View):
     def __init__(self, user_id):
-        super().__init__(timeout=120)
+        super().__init__(timeout=600)
         self.user_id = user_id
 
     @discord.ui.button(label="🌈 Градиент (2 цвета)", style=discord.ButtonStyle.primary, emoji="🌈")
     async def gradient_type(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("❌ Это не ваша сессия!", ephemeral=True)
+            return
+        if interaction.user.id not in user_data:
+            await interaction.response.send_message("❌ Сессия истекла. Начните заново с /создать_роль", ephemeral=True)
             return
         data = user_data[self.user_id]
         data.role_type = 'gradient'
@@ -102,6 +120,9 @@ class RoleTypeView(discord.ui.View):
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("❌ Это не ваша сессия!", ephemeral=True)
             return
+        if interaction.user.id not in user_data:
+            await interaction.response.send_message("❌ Сессия истекла. Начните заново с /создать_роль", ephemeral=True)
+            return
         data = user_data[self.user_id]
         data.role_type = 'solid'
         data.step = 1
@@ -113,7 +134,7 @@ class RoleTypeView(discord.ui.View):
 
 class IconChoiceView(discord.ui.View):
     def __init__(self, user_id, interaction):
-        super().__init__(timeout=120)
+        super().__init__(timeout=600)
         self.user_id = user_id
         self.interaction = interaction
 
@@ -121,6 +142,9 @@ class IconChoiceView(discord.ui.View):
     async def yes_icon(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("❌ Это не ваша сессия!", ephemeral=True)
+            return
+        if interaction.user.id not in user_data:
+            await interaction.response.send_message("❌ Сессия истекла. Начните заново с /создать_роль", ephemeral=True)
             return
         data = user_data[self.user_id]
         data.step = 4
@@ -135,6 +159,9 @@ class IconChoiceView(discord.ui.View):
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("❌ Это не ваша сессия!", ephemeral=True)
             return
+        if interaction.user.id not in user_data:
+            await interaction.response.send_message("❌ Сессия истекла. Начните заново с /создать_роль", ephemeral=True)
+            return
         data = user_data[self.user_id]
         data.icon = None
         data.step = 5
@@ -146,7 +173,7 @@ class IconChoiceView(discord.ui.View):
 
 class ManageRoleView(discord.ui.View):
     def __init__(self, role_id, owner_id, user_id):
-        super().__init__(timeout=300)
+        super().__init__(timeout=600)
         self.role_id = role_id
         self.owner_id = owner_id
         self.user_id = user_id
@@ -178,11 +205,91 @@ class ManageRoleView(discord.ui.View):
         else:
             await interaction.response.send_message("❌ Роль уже удалена.", ephemeral=True)
 
+class MyRolesView(discord.ui.View):
+    def __init__(self, user_id, roles):
+        super().__init__(timeout=120)
+        self.user_id = user_id
+        self.roles = roles
+
+    @discord.ui.button(label="🔄 Обновить список", style=discord.ButtonStyle.secondary)
+    async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ Это не ваша кнопка!", ephemeral=True)
+            return
+        await interaction.response.defer()
+        await show_my_roles(interaction)
+
+    @discord.ui.button(label="❌ Закрыть", style=discord.ButtonStyle.danger)
+    async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ Это не ваша кнопка!", ephemeral=True)
+            return
+        await interaction.response.edit_message(content="📋 Список закрыт.", view=None)
+
+async def show_my_roles(interaction):
+    user = interaction.user
+    guild = interaction.guild
+    
+    my_roles = []
+    for role in user.roles:
+        if str(role.id) in role_owners and role_owners[str(role.id)] == str(user.id):
+            my_roles.append(role)
+    
+    if not my_roles:
+        embed = discord.Embed(
+            title="📋 Ваши роли",
+            description="У вас нет кастомных ролей, созданных через бота.\nИспользуйте `/создать_роль` или `/create_role` чтобы создать новую!",
+            color=0x2b2d31
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    embed = discord.Embed(
+        title="📋 Ваши кастомные роли",
+        description="Нажмите на роль, чтобы управлять ей:",
+        color=0x2b2d31
+    )
+    
+    view = discord.ui.View(timeout=120)
+    
+    for role in my_roles:
+        view.add_item(discord.ui.Button(
+            label=role.name[:80],
+            style=discord.ButtonStyle.primary,
+            custom_id=f"manage_role_{role.id}",
+            emoji="⚙️"
+        ))
+    
+    view.add_item(discord.ui.Button(
+        label="🔄 Обновить",
+        style=discord.ButtonStyle.secondary,
+        custom_id="refresh_roles"
+    ))
+    view.add_item(discord.ui.Button(
+        label="❌ Закрыть",
+        style=discord.ButtonStyle.danger,
+        custom_id="close_roles"
+    ))
+    
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
 @bot.tree.command(name="создать_роль", description="Создает роль с градиентом или обычным цветом")
 async def create_role(interaction: discord.Interaction):
     await start_creation(interaction, edit_mode=False)
 
-async def start_creation(interaction, edit_mode=False, old_role_id=None):
+@bot.tree.command(name="create_role", description="Create a role with gradient or solid color")
+async def create_role_en(interaction: discord.Interaction):
+    await start_creation_en(interaction, edit_mode=False)
+
+@bot.tree.command(name="мои_роли", description="Показать все ваши кастомные роли")
+async def my_roles(interaction: discord.Interaction):
+    await show_my_roles(interaction)
+
+@bot.tree.command(name="my_roles", description="Show all your custom roles")
+async def my_roles_en(interaction: discord.Interaction):
+    await show_my_roles(interaction)
+
+async def start_creation(interaction, edit_mode=False, old_role_id=None, lang='ru'):
     user = interaction.user
     guild = interaction.guild
 
@@ -215,7 +322,42 @@ async def start_creation(interaction, edit_mode=False, old_role_id=None):
                 return
 
     user_data[user.id] = RoleCreator(user.id)
-    await ask_role_type(interaction)
+    await ask_role_type(interaction, lang)
+
+async def start_creation_en(interaction, edit_mode=False, old_role_id=None):
+    user = interaction.user
+    guild = interaction.guild
+
+    if edit_mode and old_role_id:
+        old_role = guild.get_role(old_role_id)
+        if old_role:
+            try:
+                await old_role.delete()
+                if str(old_role_id) in role_owners:
+                    del role_owners[str(old_role_id)]
+                    save_owners()
+            except:
+                pass
+
+    if not edit_mode:
+        for role in user.roles:
+            if str(role.id) in role_owners and role_owners[str(role.id)] == str(user.id):
+                view = ManageRoleView(role.id, user.id, user.id)
+                embed = discord.Embed(
+                    title="ℹ️ You already have a custom role!",
+                    description=f"Your current role: {role.mention}\n\nYou can **edit** or **delete** it.\nOr click 'Create new' — old role will be deleted.",
+                    color=role.color
+                )
+                view.add_item(discord.ui.Button(
+                    label="🆕 Create new (old will be deleted)",
+                    style=discord.ButtonStyle.success,
+                    custom_id=f"force_new_{user.id}_{role.id}"
+                ))
+                await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+                return
+
+    user_data[user.id] = RoleCreator(user.id)
+    await ask_role_type_en(interaction)
 
 async def ask_role_type(interaction):
     embed = discord.Embed(
@@ -225,6 +367,22 @@ async def ask_role_type(interaction):
     )
     view = RoleTypeView(interaction.user.id)
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+async def ask_role_type_en(interaction):
+    embed = discord.Embed(
+        title="🎨 Choose role type",
+        description="What role do you want to create?\n\n🌈 **Gradient** — two colors, smooth transition\n🎨 **Solid color** — one color\n\nChoose a button below:",
+        color=0x2b2d31
+    )
+    view = RoleTypeView(interaction.user.id)
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+async def safe_delete_message(message):
+    if message.guild:
+        try:
+            await message.delete()
+        except:
+            pass
 
 @bot.event
 async def on_message(message):
@@ -244,78 +402,103 @@ async def on_message(message):
     if data.cancelled:
         return
 
-    if data.step == 1:
-        hex_code = message.content.strip().replace('#', '').upper()
-        if len(hex_code) != 6 or not all(c in '0123456789ABCDEF' for c in hex_code):
-            await message.reply("❌ Неверный HEX-код! Нужно 6 символов (0-9, A-F). Попробуйте снова.", delete_after=10)
-            await message.delete()
+    try:
+        if data.step == 1:
+            hex_code = message.content.strip().replace('#', '').upper()
+            if len(hex_code) != 6 or not all(c in '0123456789ABCDEF' for c in hex_code):
+                help_msg = await message.reply(
+                    "❌ Неверный HEX-код! Нужно 6 символов (0-9, A-F).\n"
+                    "📌 **Где найти HEX-код?**\n"
+                    "• Сайт: https://htmlcolorcodes.com\n"
+                    "• Выберите цвет → скопируйте код после #\n"
+                    "• Пример: #FF5733 → напишите `FF5733`\n"
+                    "• Или используйте пипетку в фотошопе/GIMP\n\n"
+                    "🔄 Попробуйте снова:",
+                    delete_after=20
+                )
+                await safe_delete_message(message)
+                return
+            
+            data.color1 = int(hex_code, 16)
+            
+            if data.role_type == 'gradient':
+                data.step = 2
+                msg = await message.reply("✅ Первый цвет сохранён! Теперь напишите **второй цвет** (HEX-код).", delete_after=30)
+            else:
+                data.step = 3
+                msg = await message.reply("✅ Цвет сохранён! Сейчас спрошу про значок в ЛС.", delete_after=5)
+                await asyncio.sleep(2)
+                await ask_icon(message.author)
+            
+            await safe_delete_message(message)
             return
-        
-        data.color1 = int(hex_code, 16)
-        
-        if data.role_type == 'gradient':
-            data.step = 2
-            await message.reply("✅ Первый цвет сохранён! Теперь напишите **второй цвет** (HEX-код).", delete_after=30)
-        else:
+
+        if data.step == 2:
+            hex_code = message.content.strip().replace('#', '').upper()
+            if len(hex_code) != 6 or not all(c in '0123456789ABCDEF' for c in hex_code):
+                await message.reply(
+                    "❌ Неверный HEX-код! Нужно 6 символов (0-9, A-F).\n"
+                    "📌 Пример: #FF5733 → напишите `FF5733`\n"
+                    "🔄 Попробуйте снова:",
+                    delete_after=15
+                )
+                await safe_delete_message(message)
+                return
+            data.color2 = int(hex_code, 16)
             data.step = 3
-            await message.reply("✅ Цвет сохранён! Сейчас спрошу про значок в ЛС.", delete_after=5)
+            await message.reply("✅ Второй цвет сохранён! Сейчас спрошу про значок в ЛС.", delete_after=5)
+            await safe_delete_message(message)
             await asyncio.sleep(2)
             await ask_icon(message.author)
-        
-        await message.delete()
-        return
-
-    if data.step == 2:
-        hex_code = message.content.strip().replace('#', '').upper()
-        if len(hex_code) != 6 or not all(c in '0123456789ABCDEF' for c in hex_code):
-            await message.reply("❌ Неверный HEX-код! Нужно 6 символов. Попробуйте снова.", delete_after=10)
-            await message.delete()
             return
-        data.color2 = int(hex_code, 16)
-        data.step = 3
-        await message.reply("✅ Второй цвет сохранён! Сейчас спрошу про значок в ЛС.", delete_after=5)
-        await message.delete()
-        await asyncio.sleep(2)
-        await ask_icon(message.author)
-        return
 
-    if data.step == 4:
-        if message.attachments:
-            attachment = message.attachments[0]
-            if attachment.content_type and attachment.content_type.startswith('image/'):
-                try:
-                    img_data = await attachment.read()
-                    emoji_name = f"role_{data.user_id}_{message.guild.id}"
-                    emoji = await message.guild.create_custom_emoji(name=emoji_name, image=img_data)
-                    data.icon = str(emoji)
-                    data.step = 5
-                    await message.reply("✅ Значок добавлен! Теперь напишите **название роли** (макс. 100 символов).", delete_after=30)
-                    await message.delete()
-                    return
-                except Exception as e:
-                    await message.reply(f"❌ Ошибка загрузки значка: {e}. Попробуйте снова.", delete_after=10)
-                    await message.delete()
+        if data.step == 4:
+            if not message.guild:
+                await message.reply("❌ Пожалуйста, отправьте фото в канал сервера, а не в ЛС.", delete_after=10)
+                await safe_delete_message(message)
+                return
+            
+            if message.attachments:
+                attachment = message.attachments[0]
+                if attachment.content_type and attachment.content_type.startswith('image/'):
+                    try:
+                        img_data = await attachment.read()
+                        emoji_name = f"role_{data.user_id}_{message.guild.id}"
+                        emoji = await message.guild.create_custom_emoji(name=emoji_name, image=img_data)
+                        data.icon = str(emoji)
+                        data.step = 5
+                        await message.reply("✅ Значок добавлен! Теперь напишите **название роли** (макс. 100 символов).", delete_after=30)
+                        await safe_delete_message(message)
+                        return
+                    except Exception as e:
+                        await message.reply(f"❌ Ошибка загрузки значка: {e}. Попробуйте снова.", delete_after=10)
+                        await safe_delete_message(message)
+                        return
+                else:
+                    await message.reply("❌ Это не изображение! Отправьте PNG/JPG/GIF.", delete_after=10)
+                    await safe_delete_message(message)
                     return
             else:
-                await message.reply("❌ Это не изображение! Отправьте PNG/JPG/GIF.", delete_after=10)
-                await message.delete()
+                await message.reply("❌ Пожалуйста, отправьте изображение в виде файла.", delete_after=10)
+                await safe_delete_message(message)
                 return
-        else:
-            await message.reply("❌ Пожалуйста, отправьте изображение в виде файла.", delete_after=10)
-            await message.delete()
-            return
 
-    if data.step == 5:
-        if len(message.content) > 100:
-            await message.reply("❌ Слишком длинное название (макс. 100 символов).", delete_after=10)
-            await message.delete()
+        if data.step == 5:
+            if len(message.content) > 100:
+                await message.reply("❌ Слишком длинное название (макс. 100 символов).", delete_after=10)
+                await safe_delete_message(message)
+                return
+            data.role_name = message.content
+            data.step = 6
+            await message.reply("⏳ Создаю роль...", delete_after=5)
+            await safe_delete_message(message)
+            await finish_role_creation(message.author)
             return
-        data.role_name = message.content
-        data.step = 6
-        await message.reply("⏳ Создаю роль...", delete_after=5)
-        await message.delete()
-        await finish_role_creation(message.author)
-        return
+    except Exception as e:
+        await message.reply(f"❌ Ошибка: {e}. Начните заново с /создать_роль", delete_after=10)
+        if message.author.id in user_data:
+            del user_data[message.author.id]
+        await safe_delete_message(message)
 
     await bot.process_commands(message)
 
@@ -329,7 +512,10 @@ async def ask_icon(user):
     try:
         await user.send(embed=embed, view=view)
     except:
-        await user.send("❌ Не могу отправить ЛС. Включите приём сообщений.")
+        try:
+            await user.send("❌ Не могу отправить ЛС. Включите приём сообщений.")
+        except:
+            pass
 
 async def finish_role_creation(user):
     data = user_data[user.id]
@@ -401,16 +587,24 @@ async def finish_role_creation(user):
 
         save_owners()
         await user.send(embed=embed, view=view)
-        del user_data[user.id]
+        
+        # Очищаем временные сообщения
+        await data.clear_temp_messages()
+        if user.id in user_data:
+            del user_data[user.id]
 
     except Exception as e:
         await user.send(f"❌ Ошибка: {e}")
         print(f"❌ Ошибка: {e}")
+        if user.id in user_data:
+            await user_data[user.id].clear_temp_messages()
+            del user_data[user.id]
 
 @bot.event
 async def on_interaction(interaction: discord.Interaction):
     if interaction.type == discord.InteractionType.component:
         custom_id = interaction.data.get("custom_id", "")
+        
         if custom_id.startswith("force_new_"):
             parts = custom_id.split("_")
             user_id = int(parts[2])
@@ -432,6 +626,28 @@ async def on_interaction(interaction: discord.Interaction):
             
             await interaction.response.edit_message(content="🔄 Создаём новую роль...", view=None)
             await start_creation(interaction, edit_mode=False)
+            return
+        
+        if custom_id.startswith("manage_role_"):
+            role_id = int(custom_id.split("_")[2])
+            role = interaction.guild.get_role(role_id)
+            if role:
+                view = ManageRoleView(role.id, interaction.user.id, interaction.user.id)
+                embed = discord.Embed(
+                    title=f"⚙️ Управление ролью: {role.name}",
+                    description="Выберите действие:",
+                    color=role.color
+                )
+                await interaction.response.edit_message(embed=embed, view=view)
+            return
+        
+        if custom_id == "refresh_roles":
+            await show_my_roles(interaction)
+            return
+        
+        if custom_id == "close_roles":
+            await interaction.response.edit_message(content="📋 Список закрыт.", view=None)
+            return
 
 @bot.tree.command(name="удалить_чужую_роль", description="[ADMIN] Удалить роль другого пользователя")
 @app_commands.default_permissions(administrator=True)
