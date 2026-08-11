@@ -205,74 +205,6 @@ class ManageRoleView(discord.ui.View):
         else:
             await interaction.response.send_message("❌ Роль уже удалена.", ephemeral=True)
 
-class MyRolesView(discord.ui.View):
-    def __init__(self, user_id, roles):
-        super().__init__(timeout=120)
-        self.user_id = user_id
-        self.roles = roles
-
-    @discord.ui.button(label="🔄 Обновить список", style=discord.ButtonStyle.secondary)
-    async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message("❌ Это не ваша кнопка!", ephemeral=True)
-            return
-        await interaction.response.defer()
-        await show_my_roles(interaction)
-
-    @discord.ui.button(label="❌ Закрыть", style=discord.ButtonStyle.danger)
-    async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message("❌ Это не ваша кнопка!", ephemeral=True)
-            return
-        await interaction.response.edit_message(content="📋 Список закрыт.", view=None)
-
-async def show_my_roles(interaction):
-    user = interaction.user
-    guild = interaction.guild
-    
-    my_roles = []
-    for role in user.roles:
-        if str(role.id) in role_owners and role_owners[str(role.id)] == str(user.id):
-            my_roles.append(role)
-    
-    if not my_roles:
-        embed = discord.Embed(
-            title="📋 Ваши роли",
-            description="У вас нет кастомных ролей, созданных через бота.\nИспользуйте `/создать_роль` или `/create_role` чтобы создать новую!",
-            color=0x2b2d31
-        )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-        return
-    
-    embed = discord.Embed(
-        title="📋 Ваши кастомные роли",
-        description="Нажмите на роль, чтобы управлять ей:",
-        color=0x2b2d31
-    )
-    
-    view = discord.ui.View(timeout=120)
-    
-    for role in my_roles:
-        view.add_item(discord.ui.Button(
-            label=role.name[:80],
-            style=discord.ButtonStyle.primary,
-            custom_id=f"manage_role_{role.id}",
-            emoji="⚙️"
-        ))
-    
-    view.add_item(discord.ui.Button(
-        label="🔄 Обновить",
-        style=discord.ButtonStyle.secondary,
-        custom_id="refresh_roles"
-    ))
-    view.add_item(discord.ui.Button(
-        label="❌ Закрыть",
-        style=discord.ButtonStyle.danger,
-        custom_id="close_roles"
-    ))
-    
-    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-
 @bot.tree.command(name="создать_роль", description="Создает роль с градиентом или обычным цветом")
 async def create_role(interaction: discord.Interaction):
     await start_creation(interaction, edit_mode=False)
@@ -289,7 +221,21 @@ async def my_roles(interaction: discord.Interaction):
 async def my_roles_en(interaction: discord.Interaction):
     await show_my_roles(interaction)
 
-async def start_creation(interaction, edit_mode=False, old_role_id=None, lang='ru'):
+@bot.tree.command(name="sync", description="[ADMIN] Синхронизировать команды")
+@app_commands.default_permissions(administrator=True)
+async def sync_commands(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    try:
+        synced = await bot.tree.sync()
+        command_list = "\n".join([f"`/{cmd.name}`" for cmd in synced])
+        await interaction.followup.send(
+            f"✅ Синхронизировано **{len(synced)}** команд!\n\nДоступные команды:\n{command_list}",
+            ephemeral=True
+        )
+    except Exception as e:
+        await interaction.followup.send(f"❌ Ошибка: {e}", ephemeral=True)
+
+async def start_creation(interaction, edit_mode=False, old_role_id=None):
     user = interaction.user
     guild = interaction.guild
 
@@ -322,7 +268,7 @@ async def start_creation(interaction, edit_mode=False, old_role_id=None, lang='r
                 return
 
     user_data[user.id] = RoleCreator(user.id)
-    await ask_role_type(interaction, lang)
+    await ask_role_type(interaction)
 
 async def start_creation_en(interaction, edit_mode=False, old_role_id=None):
     user = interaction.user
@@ -377,6 +323,53 @@ async def ask_role_type_en(interaction):
     view = RoleTypeView(interaction.user.id)
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
+async def show_my_roles(interaction):
+    user = interaction.user
+    guild = interaction.guild
+    
+    my_roles = []
+    for role in user.roles:
+        if str(role.id) in role_owners and role_owners[str(role.id)] == str(user.id):
+            my_roles.append(role)
+    
+    if not my_roles:
+        embed = discord.Embed(
+            title="📋 Ваши роли",
+            description="У вас нет кастомных ролей, созданных через бота.\nИспользуйте `/создать_роль` или `/create_role` чтобы создать новую!",
+            color=0x2b2d31
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    embed = discord.Embed(
+        title="📋 Ваши кастомные роли",
+        description="Нажмите на роль, чтобы управлять ей:",
+        color=0x2b2d31
+    )
+    
+    view = discord.ui.View(timeout=120)
+    
+    for role in my_roles:
+        view.add_item(discord.ui.Button(
+            label=role.name[:80],
+            style=discord.ButtonStyle.primary,
+            custom_id=f"manage_role_{role.id}",
+            emoji="⚙️"
+        ))
+    
+    view.add_item(discord.ui.Button(
+        label="🔄 Обновить",
+        style=discord.ButtonStyle.secondary,
+        custom_id="refresh_roles"
+    ))
+    view.add_item(discord.ui.Button(
+        label="❌ Закрыть",
+        style=discord.ButtonStyle.danger,
+        custom_id="close_roles"
+    ))
+    
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
 async def safe_delete_message(message):
     if message.guild:
         try:
@@ -406,7 +399,7 @@ async def on_message(message):
         if data.step == 1:
             hex_code = message.content.strip().replace('#', '').upper()
             if len(hex_code) != 6 or not all(c in '0123456789ABCDEF' for c in hex_code):
-                help_msg = await message.reply(
+                await message.reply(
                     "❌ Неверный HEX-код! Нужно 6 символов (0-9, A-F).\n"
                     "📌 **Где найти HEX-код?**\n"
                     "• Сайт: https://htmlcolorcodes.com\n"
@@ -423,10 +416,10 @@ async def on_message(message):
             
             if data.role_type == 'gradient':
                 data.step = 2
-                msg = await message.reply("✅ Первый цвет сохранён! Теперь напишите **второй цвет** (HEX-код).", delete_after=30)
+                await message.reply("✅ Первый цвет сохранён! Теперь напишите **второй цвет** (HEX-код).", delete_after=30)
             else:
                 data.step = 3
-                msg = await message.reply("✅ Цвет сохранён! Сейчас спрошу про значок в ЛС.", delete_after=5)
+                await message.reply("✅ Цвет сохранён! Сейчас спрошу про значок в ЛС.", delete_after=5)
                 await asyncio.sleep(2)
                 await ask_icon(message.author)
             
@@ -587,8 +580,6 @@ async def finish_role_creation(user):
 
         save_owners()
         await user.send(embed=embed, view=view)
-        
-        # Очищаем временные сообщения
         await data.clear_temp_messages()
         if user.id in user_data:
             del user_data[user.id]
@@ -672,9 +663,27 @@ async def on_ready():
     print(f'✅ Бот {bot.user} запущен!')
     print(f'📊 Загружено ролей: {len(role_owners)}')
     print(f'🎯 Целевая роль ID: {TARGET_ROLE_ID}')
+    
+    for guild in bot.guilds:
+        bot_member = guild.get_member(bot.user.id)
+        if bot_member:
+            permissions = bot_member.guild_permissions
+            print(f"\n📋 Сервер: {guild.name}")
+            print(f"   👑 Администратор: {permissions.administrator}")
+            print(f"   ⚙️ Управление ролями: {permissions.manage_roles}")
+            print(f"   📝 Управление выражениями: {permissions.manage_emojis_and_stickers}")
+            print(f"   💬 Отправка сообщений: {permissions.send_messages}")
+            print(f"   📖 Чтение истории: {permissions.read_message_history}")
+            
+            if not permissions.administrator:
+                print("   ⚠️ Бот НЕ является администратором! Некоторые функции могут не работать.")
+    
     try:
         synced = await bot.tree.sync()
-        print(f"✅ Синхронизировано {len(synced)} команд")
+        print(f"\n✅ Синхронизировано {len(synced)} команд")
+        print("📝 Доступные команды:")
+        for cmd in synced:
+            print(f"   /{cmd.name} - {cmd.description}")
     except Exception as e:
         print(f"❌ Ошибка синхронизации: {e}")
 
